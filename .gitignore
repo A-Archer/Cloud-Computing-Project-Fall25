@@ -1,0 +1,34 @@
+# ---- Python ----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pkl
+*.egg-info/
+.env
+.venv/
+venv/
+
+# ---- CMake / Build ----
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# ---- VSCode ----
+.vscode/
+*.code-workspace
+
+# ---- Logs ----
+*.log
+*.out
+*.err
+
+# ---- System files ----
+.DS_Store
+Thumbs.db
+
+# ---- Backup files ----
+*~
+*.swp
