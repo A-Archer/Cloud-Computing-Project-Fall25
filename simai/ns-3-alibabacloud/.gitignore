@@ -20,3 +20,5 @@ simulation/cmake-cache/*
 simulation/cmake-cache/*
 
 !simulation/cmake-cache/.gitkeep
+
+.lock-ns3_linux_build
