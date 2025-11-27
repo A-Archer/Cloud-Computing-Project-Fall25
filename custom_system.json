@@ -1,0 +1,30 @@
+{
+    "scheduling-policy": "LIFO",
+    "endpoint-delay": 10,
+    "active-chunks-per-dimension": 1,
+    "preferred-dataset-splits": 4,
+    "all-reduce-implementation": [
+        "direct",
+        "direct"
+    ],
+    "all-gather-implementation": [
+        "direct",
+        "direct"
+    ],
+    "reduce-scatter-implementation": [
+        "direct",
+        "direct"
+    ],
+    "all-to-all-implementation": [
+        "direct",
+        "direct"
+    ],
+    "collective-optimization": "baseline",
+    "intra-dimension-scheduling": "FIFO",
+    "inter-dimension-scheduling": "FIFO",
+    "dimensions-count": 2,
+    "bandwidth": [
+        7200.0,
+        100.0
+    ]
+}

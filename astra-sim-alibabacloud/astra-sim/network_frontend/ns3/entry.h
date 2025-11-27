@@ -20,6 +20,7 @@
 #define PATH_TO_PGO_CONFIG "path_to_pgo_config"
 #define _QPS_PER_CONNECTION_  1
 #include "common.h"
+
 #include "ns3/applications-module.h"
 #include "ns3/core-module.h"
 #include "ns3/error-model.h"
@@ -29,8 +30,14 @@
 #include "ns3/packet.h"
 #include "ns3/point-to-point-helper.h"
 #include "ns3/qbb-helper.h"
+#include "ns3/network-module.h" // MarcController 需要用到
 #include <fstream>
 #include <iostream>
+#include <vector>
+#include <queue>
+#include <map>
+#include <set>
+#include <algorithm>
 #include <ns3/rdma-client-helper.h>
 #include <ns3/rdma-client.h>
 #include <ns3/rdma-driver.h>
@@ -49,7 +56,126 @@
 #include "astra-sim/system/MockNcclLog.h"
 using namespace ns3;
 using namespace std;
+class MarcController {
+public:
+    struct AlgoNode {
+        int id;
+        int ringLevel; // 离源节点的跳数 (Ring Layer)
+        std::vector<int> neighbors;
+    };
 
+    std::map<int, AlgoNode> graph;
+
+    // 1. 构建拓扑图 (从 NS-3 物理拓扑中读取)
+    void BuildGraph() {
+        std::cout << "[MARC-Ctrl] Scanning NS-3 Topology..." << std::endl;
+        for (uint32_t i = 0; i < NodeList::GetNNodes(); ++i) {
+            Ptr<Node> node = NodeList::GetNode(i);
+            int u = node->GetId();
+            graph[u].id = u;
+            graph[u].ringLevel = -1;
+
+            for (uint32_t j = 0; j < node->GetNDevices(); ++j) {
+                Ptr<NetDevice> dev = node->GetDevice(j);
+                Ptr<Channel> ch = dev->GetChannel();
+                if (!ch) continue;
+                // 遍历链路上的其他节点
+                for (uint32_t k = 0; k < ch->GetNDevices(); ++k) {
+                    Ptr<Node> neighbor = ch->GetDevice(k)->GetNode();
+                    int v = neighbor->GetId();
+                    if (u != v) {
+                        graph[u].neighbors.push_back(v);
+                    }
+                }
+            }
+        }
+        std::cout << "[MARC-Ctrl] Topology Built. Total Nodes: " << graph.size() << std::endl;
+    }
+
+    // 2. 核心算法：Ring-Peeling (论文 Figure 2)
+    // 输入：源节点 ID，目标节点 ID 列表
+    // 输出：打印构建出的树
+    void ComputeTree(int sourceId, std::vector<int> destinations) {
+        std::cout << "\n[MARC-Ctrl] >>> Running Ring-Peeling Algorithm <<<" << std::endl;
+        
+        // Step A: 构建环 (BFS)
+        std::queue<int> q;
+        q.push(sourceId);
+        graph[sourceId].ringLevel = 0;
+        int maxRing = 0;
+
+        while(!q.empty()) {
+            int u = q.front(); q.pop();
+            maxRing = std::max(maxRing, graph[u].ringLevel);
+            for (int v : graph[u].neighbors) {
+                if (graph[v].ringLevel == -1) {
+                    graph[v].ringLevel = graph[u].ringLevel + 1;
+                    q.push(v);
+                }
+            }
+        }
+        std::cout << "[MARC-Ctrl] Ring Construction Complete. Max Depth: " << maxRing << std::endl;
+
+        // Step B: 剥洋葱 (Greedy Set Cover)
+        std::set<int> activeNodes(destinations.begin(), destinations.end());
+        int totalSwitchesUsed = 0;
+
+        for (int r = maxRing; r > 0; r--) {
+            // 找出本层需要连接的节点
+            std::vector<int> targets;
+            for (auto& pair : graph) {
+                if (pair.second.ringLevel == r && activeNodes.count(pair.first)) {
+                    targets.push_back(pair.first);
+                }
+            }
+            if (targets.empty()) continue;
+
+            // 找出上一层的候选父节点
+            std::set<int> candidates;
+            for (int t : targets) {
+                for (int neighbor : graph[t].neighbors) {
+                    if (graph[neighbor].ringLevel == r - 1) candidates.insert(neighbor);
+                }
+            }
+
+            // 贪心选择
+            std::set<int> covered;
+            while (covered.size() < targets.size()) {
+                int bestCand = -1;
+                int maxCover = -1;
+                std::vector<int> nodesToCover;
+
+                for (int cand : candidates) {
+                    int count = 0;
+                    std::vector<int> tempCover;
+                    for (int t : targets) {
+                        if (covered.count(t)) continue;
+                        bool linked = false;
+                        for (int n : graph[t].neighbors) if (n == cand) linked = true;
+                        if (linked) { count++; tempCover.push_back(t); }
+                    }
+                    if (count > maxCover) {
+                        maxCover = count;
+                        bestCand = cand;
+                        nodesToCover = tempCover;
+                    }
+                }
+
+                if (bestCand != -1) {
+                    activeNodes.insert(bestCand); // 父节点被激活
+                    totalSwitchesUsed++;
+                    for (int t : nodesToCover) covered.insert(t);
+                    
+                    std::cout << "    [Ring " << r << "->" << r-1 << "] Selected Switch " << bestCand 
+                              << " to cover " << nodesToCover.size() << " nodes." << std::endl;
+                } else {
+                    break; 
+                }
+            }
+        }
+        std::cout << "[MARC-Ctrl] Algorithm Finished. Tree constructed successfully.\n" << std::endl;
+    }
+};
 
 std::map<std::pair<std::pair<int, int>,int>, AstraSim::ncclFlowTag> receiver_pending_queue;
 
@@ -379,6 +505,32 @@ int main1(string network_topo,string network_conf) {
     return -1;
   SetConfig();
   SetupNetwork(qp_finish,send_finish);
+
+  // ================= MARC ALGORITHM INTEGRATION =================
+  {
+      // 1. 初始化控制器
+      MarcController marc;
+      
+      // 2. 读取刚刚建立好的网络拓扑
+      marc.BuildGraph();
+
+      // 3. 模拟一个组播任务 (从 Node 0 广播给所有 GPU)
+      // 注意：我们动态扫描网络来确定目标，防止越界
+      std::vector<int> destinations;
+      uint32_t n_nodes = NodeList::GetNNodes();
+      
+      // 简单启发式：假设前 8 个节点或者是特定范围的节点是 GPU
+      // 为了演示算法，我们随机选取一些目标，或者选取 ID 较小的节点
+      for (uint32_t i = 1; i < std::min(n_nodes, (uint32_t)16); ++i) {
+          destinations.push_back(i);
+      }
+
+      // 4. 执行 Ring-Peeling 算法
+      if (!destinations.empty()) {
+          marc.ComputeTree(0, destinations);
+      }
+  }
+  // ==============================================================
 
 std::cout << "Running Simulation.\n";
   fflush(stdout);

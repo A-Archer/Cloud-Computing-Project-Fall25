@@ -1,0 +1,19 @@
+test
+TP:
+  allreduce,: 900
+  allgather,: 900
+  reducescatter,: 900
+  alltoall,: 900
+DP:
+  allreduce,: 12.5
+  allgather,: 12.5
+  reducescatter,: 12.5
+  alltoall,: 12.5
+EP:
+  allreduce,: 12.5
+  allgather,: 12.5
+  reducescatter,: 12.5
+  alltoall,: 12.5
+PP:
+  busbw: 12.5
+EOF

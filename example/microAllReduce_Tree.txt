@@ -1,0 +1,1 @@
+TREE_ALLREDUCE model_parallel_NPU_group 1 ep 1 pp 1 vpp 1 ga 1 all_gpus 16 checkpoints 0 checkpoint_initiates 0 pp_comm 50331648
