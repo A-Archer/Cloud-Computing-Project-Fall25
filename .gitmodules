@@ -8,5 +8,5 @@
 	branch = master
 [submodule "ns-3-alibabacloud"]
 	path = ns-3-alibabacloud
-	url = https://github.com/aliyun/ns-3-alibabacloud
-	branch = master
+	url = https://github.com/hermit-yoshino-xl/ns-3-alibabacloud.git
+	branch = marc_experiments
