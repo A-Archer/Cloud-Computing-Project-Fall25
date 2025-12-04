@@ -1,5 +1,7 @@
-This document is mainly intended to help users get started quickly.  
+This document is mainly intended to help users get started quickly. 
+please use GCC 9.5.0 version to rebuild!!!!!
 Run the following commands:
+
 
 ```bash
 cd ~
